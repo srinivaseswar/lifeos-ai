@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>LifeOS AI — Personalized Smart Scheduling & Productivity</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap">
+  <style>
+    :root {
+      --bg: #fff4d6;
+      --card: #ffffff;
+      --ink: #0a0a0a;
+      --bd: #0a0a0a;
+      --mut: #4a4a4a;
+      --dot: rgba(10, 10, 10, 0.12);
+      --yel: #ffe14d;
+      --pnk: #ff5da2;
+      --blu: #4d7cff;
+      --grn: #17c964;
+      --red: #ff3b30;
+      --amb: #ffb000;
+      --pri: #4d7cff;
+      --m: #4d7cff;
+      --dsp: "Archivo Black", Impact, "Arial Black", sans-serif;
+      --mono: "Space Mono", ui-monospace, Menlo, Consolas, monospace;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.5 "Space Grotesk", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      background-image: radial-gradient(var(--dot) 1.5px, transparent 1.6px);
+      background-size: 22px 22px;
+      color: var(--ink);
+    }
+    body.big { font-size: 19px; }
+    h1, h2, h3 {
+      margin: 0;
+      font-family: var(--dsp);
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: -0.01em;
+      line-height: 1.05;
+    }
+    p { margin: 6px 0; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 3px solid var(--bd);
+      border-radius: 0;
+      background: var(--card);
+      font-family: var(--mono);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      box-shadow: 4px 4px 0 var(--m);
+    }
+    .btn {
+      background: var(--m, var(--yel));
+      color: #000;
+      border: 3px solid var(--bd);
+      border-radius: 0;
+      padding: 9px 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      box-shadow: 4px 4px 0 var(--bd);
+      transition: transform 0.1s, box-shadow 0.1s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      transform: translate(-2px, -2px);
+      box-shadow: 6px 6px 0 var(--bd);
+    }
+    .btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0 0 0 var(--bd);
+    }
+    .btn.o { background: var(--card); color: var(--ink); }
+    .btn.s { padding: 5px 12px; font-size: 0.82em; box-shadow: 3px 3px 0 var(--bd); }
+    .btn.danger { background: var(--red); color: #fff; }
+    .card {
+      background: var(--card);
+      border: 3px solid var(--bd);
+      border-radius: 0;
+      padding: 18px;
+      box-shadow: 6px 6px 0 var(--bd);
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .grid > .card:hover {
+      transform: translate(-2px, -2px);
+      box-shadow: 8px 8px 0 var(--bd);
+    }
+    .g4 > .card:nth-child(4n+1) { background: var(--yel); color: #000; }
+    .g4 > .card:nth-child(4n+2) { background: #ff8fc2; color: #000; }
+    .g4 > .card:nth-child(4n+3) { background: #9be7ff; color: #000; }
+    .g4 > .card:nth-child(4n+4) { background: #8ff0b8; color: #000; }
+    .mut { color: var(--mut); }
+    .grid { display: grid; gap: 16px; }
+    .g4 { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .g3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .g2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .sp { justify-content: space-between; }
+    .pill {
+      padding: 2px 8px;
+      border: 2px solid var(--bd);
+      font-family: var(--mono);
+      font-size: 0.72em;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #000;
+      white-space: nowrap;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px 50px; }
+    .logo {
+      font-family: var(--dsp);
+      font-size: 1.3em;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      text-transform: uppercase;
+    }
+    .logo-badge {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--bd);
+      background: var(--yel);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 1.1em;
+      box-shadow: 2px 2px 0 var(--bd);
+    }
+    .hero h1 { font-size: clamp(38px, 7vw, 76px); line-height: 0.98; }
+    .hero mark {
+      background: var(--pnk);
+      color: #000;
+      border: 3px solid var(--bd);
+      padding: 0 0.15em;
+      display: inline-block;
+      transform: rotate(-2deg);
+      box-shadow: 5px 5px 0 var(--bd);
+    }
+    .mq {
+      overflow: hidden;
+      border: 3px solid var(--bd);
+      background: var(--yel);
+      color: #000;
+      margin: 28px 0;
+      transform: rotate(-1.2deg);
+      font-family: var(--dsp);
+      white-space: nowrap;
+      box-shadow: 6px 6px 0 var(--bd);
+    }
+    .mq div { display: inline-block; padding: 10px 0; animation: mq 24s linear infinite; }
+    @keyframes mq { to { transform: translateX(-50%); } }
+    .ovl {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      z-index: 100;
+      overflow: auto;
+    }
+    .app { display: flex; min-height: 100vh; }
+    .side {
+      width: 240px;
+      background: var(--card);
+      border-right: 3px solid var(--bd);
+      padding: 20px 14px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      flex: none;
+    }
+    .side .logo { margin: 0 0 22px 4px; }
+    .nv {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      text-align: left;
+      background: none;
+      color: var(--ink);
+      border: 3px solid transparent;
+      border-radius: 0;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 0.88em;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .nv:hover { border-color: var(--bd); }
+    .nv.on {
+      background: var(--m);
+      color: #000;
+      border-color: var(--bd);
+      box-shadow: 4px 4px 0 var(--bd);
+    }
+    .main { flex: 1; padding: 26px; min-width: 0; }
+    .item {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 2px dashed var(--bd);
+      flex-wrap: wrap;
+    }
+    .dot { width: 14px; height: 14px; border: 2px solid var(--bd); flex: none; }
+    .msg {
+      max-width: 84%;
+      padding: 12px 16px;
+      border: 3px solid var(--bd);
+      box-shadow: 4px 4px 0 var(--bd);
+      margin: 12px 0;
+      animation: fi 0.25s;
+    }
+    .msg.u { background: var(--m); color: #000; margin-left: auto; }
+    .msg.a { background: var(--card); }
+    @keyframes fi { from { opacity: 0; transform: translateY(8px); } }
+    .cnt { font-size: 2.3em; margin: 4px 0 0; }
+    .fab {
+      position: fixed;
+      right: 22px;
+      bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+      width: 62px;
+      height: 62px;
+      border: 3px solid var(--bd);
+      border-radius: 0;
+      background: var(--yel);
+      color: #000;
+      font-size: 1.8em;
+      cursor: pointer;
+      box-shadow: 6px 6px 0 var(--bd);
+      z-index: 50;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .fab:hover { transform: translate(-2px, -2px) rotate(-4deg); box-shadow: 8px 8px 0 var(--bd); }
+    #toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      background: var(--yel);
+      color: #000;
+      border: 3px solid var(--bd);
+      box-shadow: 5px 5px 0 var(--bd);
+      padding: 12px 22px;
+      font-weight: 700;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 200;
+      max-width: 90%;
+    }
+    .upload-zone {
+      border: 3px dashed var(--bd);
+      padding: 20px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.6);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .upload-zone:hover { background: #fff; }
+    @media (max-width: 768px) {
+      .app { flex-direction: column; }
+      .side {
+        width: 100%;
+        height: auto;
+        position: static;
+        display: flex;
+        overflow-x: auto;
+        gap: 6px;
+        padding: 10px;
+        border-right: 0;
+        border-bottom: 3px solid var(--bd);
+      }
+      .side .logo { display: none; }
+      .nv { width: auto; margin: 0; }
+      .main { padding: 18px 14px 100px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="ov" class="ovl" style="display:none" onclick="if(event.target==this)closeModal()"></div>
+  <div id="toast"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lifeos-ai
+    env: node
+    plan: free
+    buildCommand: cd backend && pnpm install
+    startCommand: cd backend && node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGO_URI
+        sync: false

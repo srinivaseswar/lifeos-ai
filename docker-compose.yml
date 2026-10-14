@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  lifeos-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lifeos-ai-app
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - JWT_SECRET=lifeos_production_secret_key_2026
+      - MONGO_URI=mongodb://mongo:27017/lifeos
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+    depends_on:
+      - mongo
+    volumes:
+      - lifeos-data:/app/backend/data
+      - lifeos-uploads:/app/backend/uploads
+
+  mongo:
+    image: mongo:7-jammy
+    container_name: lifeos-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-db-data:/data/db
+
+volumes:
+  lifeos-data:
+  lifeos-uploads:
+  mongo-db-data:

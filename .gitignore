@@ -1,0 +1,12 @@
+node_modules/
+.env
+data/store.json
+uploads/*
+!uploads/.gitkeep
+.DS_Store
+*.log
+.idea/
+.vscode/
+android/app/build/
+android/.gradle/
+android/local.properties
