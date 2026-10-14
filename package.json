@@ -4,12 +4,12 @@
   "description": "LifeOS AI — Personalized Smart Scheduling & Productivity Operating System",
   "main": "backend/server.js",
   "scripts": {
+    "build": "npm install --prefix backend",
     "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "install:all": "cd backend && pnpm install",
+    "dev": "node backend/server.js",
     "test": "node tests/e2e.test.js"
   },
-  "keywords": ["ai", "scheduling", "productivity", "brutalism", "sms", "whatsapp", "ocr"],
+  "keywords": ["ai", "scheduling", "productivity", "render", "sms", "whatsapp", "ocr"],
   "author": "LifeOS AI Team",
   "license": "MIT"
 }
