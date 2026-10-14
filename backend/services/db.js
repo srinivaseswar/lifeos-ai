@@ -62,8 +62,14 @@ const taskSchema = new mongoose.Schema({
   time: { type: String, default: '09:00' },
   dateOffset: { type: Number, default: 0 },
   date: { type: String, default: '' },
+  dateLabel: { type: String, default: '' },
   priority: { type: String, enum: ['h', 'm', 'l'], default: 'm' },
   category: { type: String, default: 'General' },
+  intent: { type: String, default: 'confirmed_commitment' },
+  needsConfirmation: { type: Boolean, default: false },
+  location: { type: String, default: null },
+  participants: { type: [String], default: [] },
+  remindBefore: { type: Number, default: 30 },
   done: { type: Boolean, default: false },
   source: { type: String, default: 'You' },
   aiGenerated: { type: Boolean, default: false },
@@ -75,6 +81,7 @@ const captureSchema = new mongoose.Schema({
   source: { type: String, default: 'SMS' },
   rawText: { type: String, required: true },
   category: { type: String, default: 'General' },
+  intent: { type: String, default: 'general' },
   status: { type: String, default: 'Reminder set' },
   sensitive: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
@@ -160,6 +167,7 @@ const db = {
       const store = loadLocalStore();
       let res = store.tasks.filter(t => t.userId === query.userId);
       if (query.done !== undefined) res = res.filter(t => t.done === query.done);
+      if (query.needsConfirmation !== undefined) res = res.filter(t => Boolean(t.needsConfirmation) === query.needsConfirmation);
       return res.sort((a, b) => (a.dateOffset - b.dateOffset) || a.time.localeCompare(b.time));
     },
 
@@ -177,7 +185,18 @@ const db = {
       }
       const store = loadLocalStore();
       const _id = 'tsk_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-      const task = { _id, done: false, dateOffset: doc.dateOffset || 0, priority: doc.priority || 'm', ...doc };
+      const task = {
+        _id,
+        done: false,
+        dateOffset: doc.dateOffset || 0,
+        priority: doc.priority || 'm',
+        intent: doc.intent || 'confirmed_commitment',
+        needsConfirmation: Boolean(doc.needsConfirmation),
+        location: doc.location || null,
+        participants: doc.participants || [],
+        remindBefore: doc.remindBefore || 30,
+        ...doc
+      };
       store.tasks.push(task);
       saveLocalStore(store);
       return task;

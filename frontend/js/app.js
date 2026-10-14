@@ -1,93 +1,84 @@
 /**
  * LifeOS AI — Client-Side Application Controller
- * Connects frontend directly to production REST API endpoints
+ * Minimalism Grid Style with Conversational Intent Understanding
  */
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Roles & Modules Configuration
-const MODS = {
+// Module metadata
+const ROLES = {
   spark: {
-    n: 'LifeOS Spark',
-    who: 'Juniors & Students',
-    age: 'Students and young learners',
-    c: '#b38cff',
-    ic: '🎓',
-    d: 'Classes, assignments, study plans, and focus habits.'
+    name: 'Student & Learner',
+    badge: 'Spark',
+    icon: '🎓',
+    desc: 'Classes, assignment deadlines, exam study plans, and focus blocks.'
   },
   prime: {
-    n: 'LifeOS Prime',
-    who: 'Working Professionals',
-    age: 'Working adults and managers',
-    c: '#4d7cff',
-    ic: '💼',
-    d: 'Work tasks, meetings, client deadlines, and daily follow-ups.'
+    name: 'Working Professional',
+    badge: 'Prime',
+    icon: '💼',
+    desc: 'Client meetings, project deliverables, bill due dates, and follow-ups.'
   },
   care: {
-    n: 'LifeOS Care',
-    who: 'Senior Citizens',
-    age: 'Seniors and elderly care',
-    c: '#2ee59d',
-    ic: '🌿',
-    d: 'Large friendly screens for medicines, doctor checkups, and family calls.'
+    name: 'Senior Citizen',
+    badge: 'Care',
+    icon: '🌿',
+    desc: 'Medication schedules, doctor appointments, wellness walks, and family calls.'
   }
 };
 
-const P = {
-  h: ['High', 'var(--red)'],
-  m: ['Medium', 'var(--amb)'],
-  l: ['Low', 'var(--grn)']
+const PRIORITY_BADGES = {
+  h: { label: 'High Priority', class: 'badge-danger' },
+  m: { label: 'Medium', class: 'badge-warning' },
+  l: { label: 'Low', class: 'badge-neutral' }
 };
 
-// Global Application State
+// Global State
 let token = localStorage.getItem('lifeos_token') || null;
 let user = null;
 let tasks = [];
 let captures = [];
 let chats = [];
-let activeView = 'dash';
-let activeTab = 'All';
+let alertsData = { pendingConfirmations: [], urgentDeadlines: [], hasAlerts: false };
+let currentView = 'dash';
+let activeFilter = 'All';
 let authMode = 'login';
-let isThinking = false;
-let sampleIndex = 0;
-let lastView = '';
+let isAiThinking = false;
+let simIndex = 0;
 
-// Toast notification helper
-function toast(msg) {
-  const t = $('#toast');
-  if (!t) return;
-  t.textContent = msg;
-  t.style.opacity = '1';
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { t.style.opacity = '0'; }, 2800);
+function showToast(msg) {
+  const el = $('#toast-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => el.classList.remove('show'), 3000);
 }
 
-// Time & date format helpers
-const fmt = t => {
+const formatTime = t => {
   if (!t) return '';
   let [h, m] = t.split(':');
   h = parseInt(h, 10);
   return `${(h % 12) || 12}:${m} ${h < 12 ? 'AM' : 'PM'}`;
 };
 
-const srt = (a, b) => (a.dateOffset - b.dateOffset) || a.time.localeCompare(b.time);
-const psrt = (a, b) => 'hml'.indexOf(a.priority) - 'hml'.indexOf(b.priority) || srt(a, b);
+const sortTasks = (a, b) => (a.dateOffset - b.dateOffset) || a.time.localeCompare(b.time);
 
-// API Fetch Helper with JWT authentication
-async function api(endpoint, options = {}) {
+// API Client
+async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const res = await fetch(`/api${endpoint}`, { ...options, headers });
+    const res = await fetch(`/api${path}`, { ...options, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 401 && token) {
         logout();
-        toast('Session expired. Please log in again.');
+        showToast('Your session has expired. Please log in again.');
       }
-      throw new Error(data.error || 'Server request failed');
+      throw new Error(data.error || 'Request failed');
     }
     return data;
   } catch (err) {
@@ -95,81 +86,96 @@ async function api(endpoint, options = {}) {
   }
 }
 
-// Data synchronization with backend
-async function syncData() {
+async function refreshAllData() {
   if (!token) return;
   try {
-    const [tList, cList, hList] = await Promise.all([
+    const [taskList, captureList, chatList, alertInfo] = await Promise.all([
       api('/tasks'),
       api('/captures'),
-      api('/ai/history')
+      api('/ai/history'),
+      api('/tasks/alerts')
     ]);
-    tasks = tList || [];
-    captures = cList || [];
-    chats = hList || [];
-    render();
-  } catch (err) {
-    console.warn('Sync warning:', err.message);
+    tasks = taskList || [];
+    captures = captureList || [];
+    chats = chatList || [];
+    alertsData = alertInfo || { pendingConfirmations: [], urgentDeadlines: [], hasAlerts: false };
+    renderApp();
+  } catch (e) {
+    console.warn('Sync error:', e.message);
   }
 }
 
-// Check session on startup
-async function initSession() {
+async function init() {
   if (token) {
     try {
       user = await api('/auth/me');
-      await syncData();
+      await refreshAllData();
     } catch (e) {
       token = null;
       localStorage.removeItem('lifeos_token');
       user = null;
     }
   }
-  render();
+  renderApp();
 }
 
-/* ---------------- Auth Handlers ---------------- */
-function openAuth(m) {
-  authMode = m;
-  renderAuthModal();
-  $('#ov').style.display = 'grid';
+/* ---------------- Auth Modal ---------------- */
+function openAuthModal(mode) {
+  authMode = mode;
+  renderAuthModalContent();
+  $('#modal-root').style.display = 'grid';
 }
 
 function closeModal() {
-  $('#ov').style.display = 'none';
+  $('#modal-root').style.display = 'none';
 }
 
-function renderAuthModal() {
+function renderAuthModalContent() {
   const isSignup = authMode === 'signup';
-  $('#ov').innerHTML = `
-    <div class="card" style="width:min(440px, 94vw); background:#fff">
-      <div class="row sp">
+  $('#modal-root').innerHTML = `
+    <div class="modal-dialog">
+      <div class="row-sp" style="margin-bottom:12px;">
         <h2>${isSignup ? 'Create Your Account' : 'Welcome Back'}</h2>
-        <button class="btn o s" onclick="closeModal()">✕</button>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal()">✕</button>
       </div>
-      <p class="mut" style="font-size:0.9em;margin-top:4px">
-        ${isSignup ? 'Get your own private, clean workspace with smart AI scheduling.' : 'Access your personalized schedule and reminders.'}
+      <p style="margin-bottom:20px;">
+        ${isSignup ? 'Set up your private personal assistant with zero predefined data.' : 'Log in to access your personalized schedule and intelligence feed.'}
       </p>
-      <div class="grid" style="margin-top:16px;gap:12px">
-        ${isSignup ? '<input id="reg_nm" placeholder="Full name (e.g. Alex Morgan)">' : ''}
-        <input id="auth_em" type="email" placeholder="Email address (e.g. name@example.com)">
-        <input id="auth_pw" type="password" placeholder="Password (min 6 characters)">
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
         ${isSignup ? `
           <div>
-            <label class="mut" style="font-size:0.8em;font-weight:700">CHOOSE YOUR MODULE / ROLE</label>
-            <select id="reg_role" style="margin-top:4px">
-              ${Object.entries(MODS).map(([k, m]) => `<option value="${k}">${m.ic} ${m.n} — ${m.who}</option>`).join('')}
+            <label>Full Name</label>
+            <input id="auth_name" placeholder="Alex Morgan">
+          </div>
+        ` : ''}
+        <div>
+          <label>Email Address</label>
+          <input id="auth_email" type="email" placeholder="name@example.com">
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="auth_password" type="password" placeholder="At least 6 characters">
+        </div>
+        ${isSignup ? `
+          <div>
+            <label>Select Experience / Role</label>
+            <select id="auth_role">
+              ${Object.entries(ROLES).map(([k, r]) => `<option value="${k}">${r.icon} ${r.name} (${r.badge})</option>`).join('')}
             </select>
           </div>
         ` : ''}
-        <div id="auth_err" style="color:var(--red);font-weight:700;font-size:0.9em;min-height:1.2em"></div>
-        <button class="btn" style="padding:12px" onclick="submitAuth()">
-          ${isSignup ? '🚀 Create Free Account' : '👉 Log In'}
+
+        <div id="auth_error" style="color:var(--danger-text);font-size:0.85rem;min-height:1.2rem;font-weight:600;"></div>
+
+        <button class="btn btn-primary" style="padding:12px;margin-top:4px;" onclick="handleAuthSubmit()">
+          ${isSignup ? 'Get Started' : 'Sign In'}
         </button>
-        <p class="mut" style="text-align:center;font-size:0.9em">
-          ${isSignup ? 'Already have an account?' : 'New to LifeOS AI?'}
-          <a href="#" onclick="authMode='${isSignup ? 'login' : 'signup'}';renderAuthModal();return false" style="color:var(--pri);font-weight:700">
-            ${isSignup ? 'Log in here' : 'Sign up now'}
+
+        <p style="text-align:center;font-size:0.85rem;margin-top:10px;">
+          ${isSignup ? 'Already have an account?' : 'New user?'}
+          <a href="#" onclick="authMode='${isSignup ? 'login' : 'signup'}';renderAuthModalContent();return false;" style="color:var(--primary);font-weight:600;text-decoration:none;">
+            ${isSignup ? 'Sign in here' : 'Create an account'}
           </a>
         </p>
       </div>
@@ -177,20 +183,20 @@ function renderAuthModal() {
   `;
 }
 
-async function submitAuth() {
-  const errEl = $('#auth_err');
-  errEl.textContent = '';
-  const email = $('#auth_em').value.trim();
-  const password = $('#auth_pw').value;
+async function handleAuthSubmit() {
+  const errBox = $('#auth_error');
+  errBox.textContent = '';
+  const email = $('#auth_email').value.trim();
+  const password = $('#auth_password').value;
 
-  if (!email) return (errEl.textContent = 'Please enter your email.');
-  if (!password) return (errEl.textContent = 'Please enter your password.');
+  if (!email) return (errBox.textContent = 'Please provide your email address.');
+  if (!password) return (errBox.textContent = 'Please provide your password.');
 
   try {
     if (authMode === 'signup') {
-      const name = $('#reg_nm').value.trim();
-      const role = $('#reg_role').value;
-      if (!name) return (errEl.textContent = 'Please enter your name.');
+      const name = $('#auth_name').value.trim();
+      const role = $('#auth_role').value;
+      if (!name) return (errBox.textContent = 'Please provide your full name.');
 
       const res = await api('/auth/register', {
         method: 'POST',
@@ -199,13 +205,9 @@ async function submitAuth() {
       token = res.token;
       user = res.user;
       localStorage.setItem('lifeos_token', token);
-      tasks = [];
-      captures = [];
-      chats = [];
       closeModal();
-      activeView = 'dash';
-      render();
-      toast(`Welcome to LifeOS, ${user.name.split(' ')[0]}!`);
+      await refreshAllData();
+      showToast(`Welcome to LifeOS AI, ${user.name.split(' ')[0]}!`);
     } else {
       const res = await api('/auth/login', {
         method: 'POST',
@@ -215,13 +217,11 @@ async function submitAuth() {
       user = res.user;
       localStorage.setItem('lifeos_token', token);
       closeModal();
-      await syncData();
-      activeView = 'dash';
-      render();
-      toast(`Welcome back, ${user.name.split(' ')[0]}!`);
+      await refreshAllData();
+      showToast(`Welcome back, ${user.name.split(' ')[0]}!`);
     }
   } catch (err) {
-    errEl.textContent = err.message;
+    errBox.textContent = err.message;
   }
 }
 
@@ -231,545 +231,653 @@ function logout() {
   tasks = [];
   captures = [];
   chats = [];
+  alertsData = { pendingConfirmations: [], urgentDeadlines: [], hasAlerts: false };
   localStorage.removeItem('lifeos_token');
-  render();
-  toast('Logged out successfully.');
+  renderApp();
+  showToast('You have been signed out.');
 }
 
-/* ---------------- Landing View ---------------- */
+/* ---------------- Minimalist Landing Page ---------------- */
 function renderLanding() {
   return `
-    <div class="wrap">
-      <div class="row sp" style="padding:18px 0">
-        <div class="logo">
-          <div class="logo-badge">⚡</div>
-          LifeOS AI
+    <div style="max-width:1160px;margin:0 auto;padding:24px 20px 80px;">
+      <!-- Header -->
+      <header class="row-sp" style="padding:16px 0 40px;">
+        <div class="row">
+          <div class="brand-mark">L</div>
+          <div>
+            <h3 style="font-size:1.15rem;font-weight:700;">LifeOS AI</h3>
+            <p style="font-size:0.78rem;color:var(--text-subtle);">Minimalist Life Intelligence</p>
+          </div>
         </div>
         <div class="row">
-          <button class="btn o s" onclick="openAuth('login')">Log In</button>
-          <button class="btn s" onclick="openAuth('signup')">Get Started</button>
+          <button class="btn btn-secondary" onclick="openAuthModal('login')">Sign In</button>
+          <button class="btn btn-primary" onclick="openAuthModal('signup')">Get Started</button>
         </div>
-      </div>
+      </header>
 
-      <section class="hero grid g2" style="align-items:center;padding:40px 0 20px">
-        <div>
-          <h1>YOUR LIFE.<br><mark>SMARTER</mark><br>WITH AI.</h1>
-          <p class="mut" style="font-size:1.15em;margin:18px 0 24px">
-            Personalized operating system for <b>Students</b>, <b>Employees</b>, and <b>Senior Citizens</b>.
-            Captures appointments, deadlines, and reminders from your messages, calls, and photos — automatically.
-          </p>
-          <div class="row" style="gap:14px">
-            <button class="btn" style="padding:12px 22px;font-size:1.05em" onclick="openAuth('signup')">
-              Get Started Free →
-            </button>
-            <button class="btn o" style="padding:12px 20px" onclick="openAuth('login')">
-              Log In
-            </button>
+      <!-- Hero Section in Minimalist Grid -->
+      <section style="padding:30px 0 50px;">
+        <div class="grid grid-2" style="align-items:center;gap:36px;">
+          <div>
+            <span class="badge badge-primary" style="margin-bottom:14px;">Next-Generation Assistant</span>
+            <h1 style="margin-bottom:18px;">Your conversations,<br>intelligently scheduled.</h1>
+            <p style="font-size:1.05rem;line-height:1.6;margin-bottom:28px;">
+              LifeOS AI understands calls, SMS, WhatsApp conversations, and emails. It distinguishes casual chats from genuine commitments, automatically organizes your calendar, and reminds you before deadlines.
+            </p>
+            <div class="row">
+              <button class="btn btn-primary" style="padding:12px 24px;font-size:0.95rem;" onclick="openAuthModal('signup')">
+                Start Free Account →
+              </button>
+              <button class="btn btn-secondary" style="padding:12px 20px;" onclick="openAuthModal('login')">
+                Sign In
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="card">
-          <div class="row sp" style="margin-bottom:12px">
-            <b>Today's Smart Schedule</b>
-            <span class="pill" style="background:var(--yel)">Live Preview</span>
+          <!-- Conversational Intelligence Showcase Card -->
+          <div class="card" style="padding:24px;background:#ffffff;">
+            <div class="row-sp" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:12px;">
+              <div class="row">
+                <span class="badge badge-success">AI Understanding Example</span>
+              </div>
+              <small class="badge badge-neutral">WhatsApp Dialogue</small>
+            </div>
+
+            <div style="font-size:0.88rem;display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+              <div style="background:var(--surface-subtle);padding:10px 14px;border-radius:8px;border-left:3px solid var(--text-subtle);">
+                <b>Friend Alex:</b> "Hey, let's go on a trip this weekend! What do you think?"
+              </div>
+              <div style="background:var(--primary-light);padding:10px 14px;border-radius:8px;border-left:3px solid var(--primary);margin-left:auto;text-align:right;">
+                <b>You:</b> "Okay, let's go! Saturday morning works."
+              </div>
+            </div>
+
+            <div style="border:1px solid var(--success-border);background:var(--success-light);padding:14px;border-radius:8px;">
+              <div class="row-sp">
+                <div>
+                  <b style="color:var(--success-text);font-size:0.92rem;">🗓️ Confirmed Commitment Detected</b>
+                  <p style="color:var(--success-text);font-size:0.82rem;margin-top:2px;">
+                    Mutual agreement recognized. Weekend trip added to schedule for Saturday 10:00 AM.
+                  </p>
+                </div>
+                <span class="badge badge-success">Scheduled</span>
+              </div>
+            </div>
           </div>
-          <div class="item">
-            <span class="dot" style="background:var(--red)"></span>
-            <span style="flex:1"><b>Doctor Consultation</b> (City Clinic)</span>
-            <span class="mut">10:30 AM</span>
-          </div>
-          <div class="item">
-            <span class="dot" style="background:var(--red)"></span>
-            <span style="flex:1"><b>Project Proposal Due</b></span>
-            <span class="mut">02:00 PM</span>
-          </div>
-          <div class="item">
-            <span class="dot" style="background:var(--amb)"></span>
-            <span style="flex:1"><b>Team Sync & Review</b></span>
-            <span class="mut">03:30 PM</span>
-          </div>
-          <div class="item">
-            <span class="dot" style="background:var(--grn)"></span>
-            <span style="flex:1"><b>Evening Walk & Relaxation</b></span>
-            <span class="mut">06:00 PM</span>
-          </div>
-          <p class="mut" style="font-size:0.85em;margin-top:12px">
-            🤖 <b>AI Schedule Engine:</b> Sensitive OTPs are discarded. Only genuine events and reminders are scheduled.
-          </p>
         </div>
       </section>
 
-      <div class="mq">
-        <div>${'STUDENTS ✶ EMPLOYEES ✶ SENIORS ✶ SMART SMS & WHATSAPP CAPTURE ✶ PHOTO SCANNING ✶ PRIVACY FIRST ✶ '.repeat(5)}</div>
+      <!-- Roles Grid -->
+      <div style="margin:40px 0 20px;">
+        <h2 style="font-size:1.35rem;margin-bottom:8px;">Designed for Every Stage of Life</h2>
+        <p style="margin-bottom:20px;">Choose a role for an interface and schedule tailored specifically to your daily responsibilities.</p>
       </div>
 
-      <h2 style="margin:28px 0 16px">Choose Your Experience</h2>
-      <div class="grid g3">
-        ${Object.values(MODS).map(m => `
-          <div class="card" style="background:${m.c};color:#000">
-            <div style="font-size:2.4em">${m.ic}</div>
-            <h3 style="margin:8px 0 4px">${m.n}</h3>
-            <b style="font-family:var(--mono);font-size:0.9em">${m.who}</b>
-            <p style="margin-top:8px">${m.d}</p>
+      <div class="grid grid-3">
+        ${Object.entries(ROLES).map(([key, r]) => `
+          <div class="card" style="cursor:pointer;" onclick="openAuthModal('signup')">
+            <div style="font-size:1.8rem;margin-bottom:10px;">${r.icon}</div>
+            <h3 style="margin-bottom:6px;">${r.name}</h3>
+            <span class="badge badge-primary" style="margin-bottom:12px;">${r.badge}</span>
+            <p style="font-size:0.9rem;">${r.desc}</p>
           </div>
         `).join('')}
       </div>
 
-      <h2 style="margin:36px 0 16px">Intelligent Core Features</h2>
-      <div class="grid g4">
-        ${[
-          ['📲', 'Smart Message Capture', 'Reads SMS, WhatsApp notes, and missed calls with explicit permission.'],
-          ['📷', 'Photo & Document Scan', 'Upload doctor cards, bills, or chat screenshots. AI extracts the date and time.'],
-          ['⏰', 'Intelligent Scheduling', 'High priority events scheduled automatically; marketing promotions muted.'],
-          ['🛡️', 'Privacy & Security First', 'Sensitive codes (OTPs, PINs) are scrubbed and never stored. User-isolated data.']
-        ].map(x => `
-          <div class="card">
-            <div style="font-size:1.8em;margin-bottom:8px">${x[0]}</div>
-            <b>${x[1]}</b>
-            <p class="mut" style="font-size:0.9em;margin-top:6px">${x[2]}</p>
-          </div>
-        `).join('')}
+      <!-- Features Minimalist Grid -->
+      <div style="margin:60px 0 20px;">
+        <h2 style="font-size:1.35rem;margin-bottom:8px;">Core Capabilities</h2>
+        <p style="margin-bottom:20px;">Intelligent, privacy-focused life management that respects your personal boundaries.</p>
+      </div>
+
+      <div class="grid grid-4">
+        <div class="card card-metric">
+          <div style="font-size:1.5rem;margin-bottom:8px;">💬</div>
+          <h3>Contextual Understanding</h3>
+          <p style="margin-top:6px;font-size:0.85rem;">Distinguishes confirmed plans from casual chat and proposals.</p>
+        </div>
+        <div class="card card-metric">
+          <div style="font-size:1.5rem;margin-bottom:8px;">⏰</div>
+          <h3>Proactive Scheduling</h3>
+          <p style="margin-top:6px;font-size:0.85rem;">Extracts dates, times, and locations directly into your calendar.</p>
+        </div>
+        <div class="card card-metric">
+          <div style="font-size:1.5rem;margin-bottom:8px;">🔔</div>
+          <h3>Smart Alerts</h3>
+          <p style="margin-top:6px;font-size:0.85rem;">Pre-due date reminders and follow-up prompts before you forget.</p>
+        </div>
+        <div class="card card-metric">
+          <div style="font-size:1.5rem;margin-bottom:8px;">🛡️</div>
+          <h3>Zero Data Leakage</h3>
+          <p style="margin-top:6px;font-size:0.85rem;">Sensitive codes (OTPs, PINs) are scrubbed and never saved.</p>
+        </div>
       </div>
     </div>
   `;
 }
 
-/* ---------------- Main Views ---------------- */
-const itemComponent = x => `
-  <div class="item" style="${x.done ? 'opacity:0.5;text-decoration:line-through' : ''}">
-    <span class="dot" style="background:${P[x.priority][1]}"></span>
-    <span class="mut" style="min-width:80px">${x.dateOffset ? 'Tmrw ' : ''}${fmt(x.time)}</span>
-    <span style="flex:1">
-      <b>${esc(x.title)}</b>
-      ${x.category ? `<small class="mut" style="margin-left:6px">· ${esc(x.category)}</small>` : ''}
-    </span>
-    <span class="pill" style="background:${P[x.priority][1]}">${P[x.priority][0]}</span>
-    <button class="btn o s" onclick="toggleTask('${x._id}')">${x.done ? 'Undo' : 'Done ✓'}</button>
-    <button class="btn o s" onclick="deleteTask('${x._id}')">✕</button>
-  </div>
-`;
+/* ---------------- Main Authenticated Views ---------------- */
+const scheduleItemComponent = task => {
+  const p = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.m;
+  const isPending = Boolean(task.needsConfirmation);
+
+  return `
+    <div class="schedule-item ${task.done ? 'is-done' : ''}">
+      <input type="checkbox" style="width:auto;cursor:pointer;" ${task.done ? 'checked' : ''} onchange="toggleTaskDone('${task._id}')">
+      
+      <div class="item-time">
+        ${task.dateOffset ? (task.dateLabel || 'Tmrw') + ' ' : ''}${formatTime(task.time)}
+      </div>
+
+      <div style="flex:1;min-width:0;">
+        <div class="row" style="gap:8px;">
+          <span class="item-title" style="font-weight:600;font-size:0.92rem;color:var(--text-main);">
+            ${esc(task.title)}
+          </span>
+          ${isPending ? `<span class="badge badge-warning">Awaiting Confirmation</span>` : ''}
+          ${task.location ? `<span class="badge badge-neutral">📍 ${esc(task.location)}</span>` : ''}
+        </div>
+        <div class="row" style="gap:10px;margin-top:3px;font-size:0.8rem;color:var(--text-muted);">
+          <span>Category: <b>${esc(task.category || 'General')}</b></span>
+          ${task.participants && task.participants.length ? `<span>With: ${esc(task.participants.join(', '))}</span>` : ''}
+          <span>Source: ${esc(task.source || 'Manual')}</span>
+        </div>
+      </div>
+
+      <div class="row" style="gap:8px;">
+        <span class="badge ${p.class}">${p.label}</span>
+        ${isPending ? `
+          <button class="btn btn-success btn-sm" onclick="confirmTentativeTask('${task._id}')">Confirm Plan</button>
+        ` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="deleteTaskItem('${task._id}')">✕</button>
+      </div>
+    </div>
+  `;
+};
 
 const VIEWS = {
   dash() {
-    const m = MODS[user.role] || MODS.spark;
-    const pending = tasks.filter(x => !x.done).sort(srt);
-    const today = pending.filter(x => !x.dateOffset);
-    const highPri = today.filter(x => x.priority === 'h');
-    const completed = tasks.filter(x => x.done).length;
-    const pct = tasks.length ? Math.round((completed * 100) / tasks.length) : 0;
-
-    const hr = new Date().getHours();
-    const greeting = hr < 12 ? 'Good Morning' : hr < 17 ? 'Good Afternoon' : 'Good Evening';
-
-    const defaultTips = {
-      spark: today[0]
-        ? `You have "${today[0].title}" at ${fmt(today[0].time)}. Schedule a 30-minute focus session before your next class.`
-        : 'Your student schedule is clear. Use this time to revise or explore new topics!',
-      prime: highPri.length
-        ? `You have ${highPri.length} high-priority deadline(s) today. Tackle them before afternoon meetings.`
-        : 'No urgent deadlines today. A great day to clear backlog tasks.',
-      care: today[0]
-        ? `Next up: ${today[0].title} at ${fmt(today[0].time)}. Remember to take water with your routine.`
-        : 'All reminders for today are completed. Relax and have a pleasant day!'
-    };
-
-    const tip = tasks.length
-      ? defaultTips[user.role]
-      : 'Your schedule is empty. Add a task or use Smart Capture to read incoming SMS, WhatsApp messages, or photos.';
+    const roleInfo = ROLES[user.role] || ROLES.spark;
+    const pendingTasks = tasks.filter(t => !t.done && !t.needsConfirmation).sort(sortTasks);
+    const todayTasks = pendingTasks.filter(t => !t.dateOffset);
+    const upcomingTasks = pendingTasks.filter(t => t.dateOffset);
+    const pendingReviews = tasks.filter(t => t.needsConfirmation && !t.done);
+    const urgentItems = tasks.filter(t => t.priority === 'h' && !t.done);
 
     return `
-      <div class="row sp" style="flex-wrap:wrap;margin-bottom:14px">
+      <!-- Top Overview Greeting -->
+      <div class="row-sp" style="margin-bottom:24px;">
         <div>
-          <h2>${greeting}, ${esc(user.name.split(' ')[0])}!</h2>
-          <p class="mut">${m.d}</p>
+          <h2>Dashboard</h2>
+          <p>Welcome back, ${esc(user.name)}. Here is your proactive daily briefing.</p>
         </div>
+        <button class="btn btn-primary btn-sm" onclick="optimizeDailySchedule()">⚡ Optimize Schedule</button>
       </div>
 
-      <div class="grid g4" style="margin:16px 0">
-        <div class="card">
-          <div class="mut" style="font-size:0.85em">Today's Tasks</div>
-          <h2 class="cnt" data-n="${today.length}" data-s="">${today.length}</h2>
-        </div>
-        <div class="card">
-          <div class="mut" style="font-size:0.85em">High Priority</div>
-          <h2 class="cnt" data-n="${highPri.length}" data-s="">${highPri.length}</h2>
-        </div>
-        <div class="card">
-          <div class="mut" style="font-size:0.85em">Completed</div>
-          <h2 class="cnt" data-n="${pct}" data-s="%">${pct}%</h2>
-        </div>
-        <div class="card">
-          <div class="mut" style="font-size:0.85em">Smart Captures</div>
-          <h2 class="cnt" data-n="${captures.length}" data-s="">${captures.length}</h2>
-        </div>
-      </div>
-
-      <div class="card" style="border-left:6px solid var(--m);margin-bottom:18px">
-        <div class="row sp" style="margin-bottom:6px">
-          <b>🤖 AI Schedule Recommendation</b>
-          <span class="pill" style="background:var(--yel)">Smart Scheduler</span>
-        </div>
-        <p>${esc(tip)}</p>
-        <button class="btn s" style="margin-top:8px" onclick="optimizeSchedule()">⚡ Apply to My Schedule</button>
-      </div>
-
-      <div class="grid g2">
-        <div class="card">
-          <div class="row sp" style="margin-bottom:8px">
-            <h3>Today's Schedule</h3>
-            <button class="btn o s" onclick="activeView='rem';render()">＋ Add</button>
+      <!-- Proactive Attention Banner (Smart Alerts) -->
+      ${pendingReviews.length ? `
+        <div class="alert-banner alert-warning">
+          <div style="font-size:1.3rem;">⚠️</div>
+          <div style="flex:1;">
+            <b>${pendingReviews.length} Potential Plan(s) Need Your Confirmation</b>
+            <p style="color:var(--warning-text);font-size:0.88rem;margin-top:2px;">
+              AI detected tentative activities from conversations. Review and confirm to lock them into your schedule.
+            </p>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+              ${pendingReviews.map(p => `
+                <div class="row-sp" style="background:#fff;padding:8px 12px;border-radius:6px;border:1px solid var(--warning-border);">
+                  <div>
+                    <b>${esc(p.title)}</b> (${formatTime(p.time)})
+                    ${p.location ? `· 📍 ${esc(p.location)}` : ''}
+                  </div>
+                  <div class="row" style="gap:6px;">
+                    <button class="btn btn-success btn-sm" onclick="confirmTentativeTask('${p._id}')">Confirm & Schedule</button>
+                    <button class="btn btn-secondary btn-sm" onclick="deleteTaskItem('${p._id}')">Dismiss</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
           </div>
-          ${today.map(itemComponent).join('') || '<p class="mut">No tasks scheduled for today. Add one or use Smart Capture.</p>'}
         </div>
-        <div class="card">
-          <div class="row sp" style="margin-bottom:8px">
-            <h3>Upcoming</h3>
+      ` : ''}
+
+      <!-- Minimalist Metrics Grid -->
+      <div class="grid grid-4" style="margin-bottom:26px;">
+        <div class="card card-metric">
+          <div class="row-sp">
+            <span style="font-size:0.85rem;font-weight:600;color:var(--text-muted);">Today's Schedule</span>
+            <span class="badge badge-primary">Active</span>
           </div>
-          ${pending.filter(x => x.dateOffset).map(itemComponent).join('') || '<p class="mut">Nothing scheduled for tomorrow yet.</p>'}
+          <div class="metric-value">${todayTasks.length}</div>
         </div>
+        <div class="card card-metric">
+          <div class="row-sp">
+            <span style="font-size:0.85rem;font-weight:600;color:var(--text-muted);">Urgent Deadlines</span>
+            <span class="badge badge-danger">Priority</span>
+          </div>
+          <div class="metric-value">${urgentItems.length}</div>
+        </div>
+        <div class="card card-metric">
+          <div class="row-sp">
+            <span style="font-size:0.85rem;font-weight:600;color:var(--text-muted);">Pending Reviews</span>
+            <span class="badge badge-warning">Tentative</span>
+          </div>
+          <div class="metric-value">${pendingReviews.length}</div>
+        </div>
+        <div class="card card-metric">
+          <div class="row-sp">
+            <span style="font-size:0.85rem;font-weight:600;color:var(--text-muted);">Processed Signals</span>
+            <span class="badge badge-neutral">Streams</span>
+          </div>
+          <div class="metric-value">${captures.length}</div>
+        </div>
+      </div>
+
+      <!-- Schedule Minimalist Split Grid -->
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="row-sp" style="margin-bottom:16px;">
+            <h3>Today's Confirmed Timeline</h3>
+            <button class="btn btn-secondary btn-sm" onclick="currentView='rem';renderApp();">＋ New</button>
+          </div>
+          ${todayTasks.length ? todayTasks.map(scheduleItemComponent).join('') : `
+            <div style="text-align:center;padding:36px 12px;color:var(--text-muted);">
+              <div style="font-size:1.8rem;margin-bottom:6px;">☕</div>
+              <p>Your schedule for today is completely clear.</p>
+              <small>Captured events from SMS, WhatsApp, and Emails will appear here automatically.</small>
+            </div>
+          `}
+        </div>
+
+        <div class="card">
+          <div class="row-sp" style="margin-bottom:16px;">
+            <h3>Upcoming Commitments</h3>
+            <span class="badge badge-neutral">Next 7 Days</span>
+          </div>
+          ${upcomingTasks.length ? upcomingTasks.map(scheduleItemComponent).join('') : `
+            <div style="text-align:center;padding:36px 12px;color:var(--text-muted);">
+              <div style="font-size:1.8rem;margin-bottom:6px;">📅</div>
+              <p>No upcoming commitments scheduled.</p>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  },
+
+  cap() {
+    const perms = user.permissions || { SMS: true, Call: true, WhatsApp: true, Photos: true, Email: true, Laptop: true };
+
+    return `
+      <div class="row-sp" style="margin-bottom:20px;">
+        <div>
+          <h2>Smart Information Tracking</h2>
+          <p>Extract commitments, tasks, and deadlines from conversations, messages, emails, and photos.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:24px;">
+        <div class="grid grid-2" style="margin-bottom:16px;">
+          <div>
+            <label>Communication Channel</label>
+            <select id="cap_src">
+              <option value="WhatsApp" ${perms.WhatsApp ? '' : 'disabled'}>🟢 WhatsApp Dialogue ${perms.WhatsApp ? '' : '(Disabled in Settings)'}</option>
+              <option value="SMS" ${perms.SMS ? '' : 'disabled'}>💬 SMS Message ${perms.SMS ? '' : '(Disabled in Settings)'}</option>
+              <option value="Call" ${perms.Call ? '' : 'disabled'}>📞 Phone Call Log ${perms.Call ? '' : '(Disabled in Settings)'}</option>
+              <option value="Email" ${perms.Email ? '' : 'disabled'}>✉️ Email Notification ${perms.Email ? '' : '(Disabled in Settings)'}</option>
+              <option value="Laptop" ${perms.Laptop ? '' : 'disabled'}>💻 Notes & Memos ${perms.Laptop ? '' : '(Disabled in Settings)'}</option>
+            </select>
+          </div>
+
+          <div class="row" style="align-items:flex-end;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="submitTextCapture()">⚡ Understand & Schedule</button>
+            <button class="btn btn-secondary" onclick="triggerFilePicker()">📷 Scan Photo/Doc</button>
+            <button class="btn btn-secondary" onclick="pasteClip()">📋 Paste</button>
+            <button class="btn btn-secondary" onclick="dictateVoice()">🎤 Voice</button>
+            <button class="btn btn-secondary" onclick="runSimulation()">🧪 Test Examples</button>
+          </div>
+        </div>
+
+        <label>Message Content or Dialogue</label>
+        <textarea id="cap_text" rows="3" placeholder="Paste conversation, email, or message. E.g.:&#10;Alex: 'Let's go on a trip this weekend'&#10;Me: 'Okay, let's go!'"></textarea>
+
+        <input type="file" id="file_picker" accept="image/*,.txt" style="display:none;" onchange="uploadPhotoOrDoc(this.files[0])">
+
+        <div style="border:1px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;margin-top:12px;background:var(--surface-subtle);cursor:pointer;" onclick="triggerFilePicker()">
+          <p style="font-size:0.85rem;color:var(--text-muted);">
+            📷 <b>Drop receipts, prescription slips, or WhatsApp chat exports here</b> (OCR extracts dates & deadlines automatically)
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-sp" style="margin-bottom:16px;">
+          <h3>Extracted Information Stream</h3>
+          ${captures.length ? `<button class="btn btn-secondary btn-sm" onclick="clearAllCaptures()">Clear History</button>` : ''}
+        </div>
+
+        ${captures.length ? captures.map(c => `
+          <div class="schedule-item" style="padding:12px 14px;">
+            <span class="badge badge-neutral" style="font-family:var(--font-mono);">${c.source}</span>
+            <div style="flex:1;min-width:0;">
+              <b style="font-size:0.9rem;color:var(--text-main);">${esc(c.rawText)}</b>
+              <div class="row" style="gap:10px;margin-top:2px;font-size:0.78rem;color:var(--text-muted);">
+                <span>Category: <b>${esc(c.category || 'General')}</b></span>
+                <span>Status: <b style="color:${c.sensitive ? 'var(--danger-text)' : 'var(--text-main)'};">${esc(c.status)}</b></span>
+              </div>
+            </div>
+          </div>
+        `).join('') : `
+          <div style="text-align:center;padding:32px;color:var(--text-muted);">
+            <p>No messages analyzed yet. Paste a conversation above or click "Test Examples" to observe AI intent parsing.</p>
+          </div>
+        `}
       </div>
     `;
   },
 
   rem() {
     return `
-      <h2>Reminders & Tasks</h2>
-      <p class="mut">Add personal tasks or manage your scheduled reminders.</p>
+      <div class="row-sp" style="margin-bottom:20px;">
+        <div>
+          <h2>Schedule & Commitments</h2>
+          <p>Organize confirmed obligations and track deadlines.</p>
+        </div>
+      </div>
 
-      <div class="card" style="margin:16px 0">
-        <div class="grid g4">
-          <input id="rt" placeholder="What should I remind you about?" style="grid-column:1/-1">
-          <div>
-            <label class="mut" style="font-size:0.75em;font-weight:700">TIME</label>
-            <input id="rm" type="time" value="09:00">
+      <div class="card" style="margin-bottom:24px;">
+        <h3 style="margin-bottom:14px;">Add Commitment or Reminder</h3>
+        <div class="grid grid-3">
+          <div style="grid-column:1/-1;">
+            <label>Task / Event Title</label>
+            <input id="new_title" placeholder="e.g. Mathematics Problem Set Submission">
           </div>
           <div>
-            <label class="mut" style="font-size:0.75em;font-weight:700">WHEN</label>
-            <select id="rd">
+            <label>Time</label>
+            <input id="new_time" type="time" value="10:00">
+          </div>
+          <div>
+            <label>Day</label>
+            <select id="new_day">
               <option value="0">Today</option>
               <option value="1">Tomorrow</option>
             </select>
           </div>
           <div>
-            <label class="mut" style="font-size:0.75em;font-weight:700">PRIORITY</label>
-            <select id="rp">
-              <option value="h">High Priority</option>
-              <option value="m" selected>Medium Priority</option>
-              <option value="l">Low Priority</option>
+            <label>Priority</label>
+            <select id="new_pri">
+              <option value="h">High (Urgent / Health / Bill)</option>
+              <option value="m" selected>Medium (Standard Meeting)</option>
+              <option value="l">Low (Casual)</option>
             </select>
           </div>
-          <div style="display:flex;align-items:flex-end">
-            <button class="btn" style="width:100%" onclick="createTask()">Add Task</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Active Reminders (${tasks.filter(t => !t.done).length})</h3>
-        ${tasks.filter(t => !t.done).sort(srt).map(itemComponent).join('') || '<p class="mut">No active reminders. Add one above!</p>'}
-      </div>
-    `;
-  },
-
-  cap() {
-    const permissions = user.permissions || { SMS: true, Call: true, WhatsApp: true, Photos: true, Email: true, Laptop: true };
-
-    return `
-      <h2>Smart Capture & AI Scheduling</h2>
-      <p class="mut">
-        LifeOS automatically extracts appointments, deadlines, and meetings from SMS, WhatsApp, Photos, and Calls.
-        Sensitive codes (OTPs, PINs) are automatically discarded.
-      </p>
-
-      <div class="card" style="margin:16px 0">
-        <div class="grid g2" style="align-items:center">
           <div>
-            <label class="mut" style="font-size:0.75em;font-weight:700">INPUT SOURCE</label>
-            <select id="cs">
-              <option value="SMS" ${permissions.SMS ? '' : 'disabled'}>💬 SMS Message ${permissions.SMS ? '' : '(Disabled in Settings)'}</option>
-              <option value="WhatsApp" ${permissions.WhatsApp ? '' : 'disabled'}>🟢 WhatsApp Message ${permissions.WhatsApp ? '' : '(Disabled in Settings)'}</option>
-              <option value="Call" ${permissions.Call ? '' : 'disabled'}>📞 Call Note / Missed Call ${permissions.Call ? '' : '(Disabled in Settings)'}</option>
-              <option value="Email" ${permissions.Email ? '' : 'disabled'}>✉️ Email Reminder ${permissions.Email ? '' : '(Disabled in Settings)'}</option>
-              <option value="Laptop" ${permissions.Laptop ? '' : 'disabled'}>💻 Notes / Memo ${permissions.Laptop ? '' : '(Disabled in Settings)'}</option>
+            <label>Location (Optional)</label>
+            <input id="new_loc" placeholder="Room 101 / Zoom / Clinic">
+          </div>
+          <div>
+            <label>Category</label>
+            <select id="new_cat">
+              <option value="Work & Meetings">Work & Meetings</option>
+              <option value="Academic & Deadlines">Academic & Deadlines</option>
+              <option value="Health & Care">Health & Care</option>
+              <option value="Bills & Financial">Bills & Financial</option>
+              <option value="Travel & Social">Travel & Social</option>
+              <option value="General">General</option>
             </select>
           </div>
-
-          <div class="row" style="flex-wrap:wrap">
-            <button class="btn" onclick="captureText()">⚡ Analyze & Schedule</button>
-            <button class="btn o" onclick="triggerPhotoUpload()">📷 Scan Photo</button>
-            <button class="btn o" onclick="pasteClipboard()">📋 Paste</button>
-            <button class="btn o" onclick="voiceInput()">🎤 Voice</button>
-            <button class="btn o" onclick="simulateIncoming()">🧪 Simulate</button>
+          <div style="display:flex;align-items:flex-end;">
+            <button class="btn btn-primary" style="width:100%;" onclick="createNewTask()">Schedule Event</button>
           </div>
-        </div>
-
-        <textarea id="ct" rows="3" style="margin-top:12px" placeholder="Paste or type a message, note, or call summary. E.g.: 'Dr. Sharma: Clinic appointment confirmed tomorrow at 10:30 am' or 'Project presentation due Friday at 2 pm'"></textarea>
-
-        <!-- Hidden photo upload input -->
-        <input type="file" id="photo_input" accept="image/*,.txt" style="display:none" onchange="handlePhotoUpload(this.files[0])">
-
-        <div class="upload-zone" style="margin-top:10px" onclick="triggerPhotoUpload()">
-          <b>📷 Click here to upload a Photo, Receipt, Prescription, or WhatsApp Chat (.txt)</b>
-          <p class="mut" style="font-size:0.85em;margin:4px 0">AI OCR extracts dates, times, and actionable reminders automatically.</p>
         </div>
       </div>
 
       <div class="card">
-        <div class="row sp" style="margin-bottom:8px">
-          <h3>Captured Activity & Event Log</h3>
-          ${captures.length ? `<button class="btn o s" onclick="clearCaptures()">Clear Log</button>` : ''}
+        <div class="row-sp" style="margin-bottom:16px;">
+          <h3>All Scheduled Items (${tasks.length})</h3>
         </div>
-        ${captures.map(x => `
-          <div class="item">
-            <span class="pill" style="background:${x.sensitive ? 'var(--red);color:#fff' : 'var(--m)'}">${x.source}</span>
-            <span style="flex:1">
-              <b>${esc(x.rawText)}</b><br>
-              <small class="mut">
-                Category: <b>${esc(x.category || 'General')}</b> ·
-                Status: <span style="font-weight:700;color:${x.status.includes('Reminder set') ? 'var(--grn)' : x.sensitive ? 'var(--red)' : 'var(--ink)'}">${esc(x.status)}</span>
-              </small>
-            </span>
+        ${tasks.length ? tasks.sort(sortTasks).map(scheduleItemComponent).join('') : `
+          <div style="text-align:center;padding:32px;color:var(--text-muted);">
+            <p>No reminders yet. Add one above or capture messages.</p>
           </div>
-        `).join('') || '<p class="mut">No captured activity yet. Try typing a message or click "Simulate" to test AI scheduling!</p>'}
+        `}
       </div>
     `;
   },
 
   ai() {
-    const roleChips = {
-      spark: [
-        'Make a 3-day study plan for my exams',
-        'Explain recursion in simple terms',
-        'What should I focus on first today?'
-      ],
-      prime: [
-        'Prioritize my deadlines today',
-        'Draft a concise follow-up email',
-        'What meetings do I have scheduled?'
-      ],
-      care: [
-        'What reminders do I have today?',
-        'Give me a gentle evening routine',
-        'Explain my schedule in simple words'
-      ]
+    const chips = {
+      spark: ['Suggest an exam revision schedule', 'What assignments are due this week?', 'Help me plan my afternoon study block'],
+      prime: ['Prioritize my meetings and deadlines today', 'Draft a polite follow-up regarding the proposal', 'What follow-ups are pending?'],
+      care: ['Review my medicine reminders for today', 'What appointments do I have coming up?', 'Help me plan a relaxing evening routine']
     }[user.role] || ['What is on my schedule today?'];
 
     return `
-      <h2>AI Assistant</h2>
-      <p class="mut">Ask anything. Your assistant knows your schedule, deadlines, and tasks.</p>
+      <div class="row-sp" style="margin-bottom:20px;">
+        <div>
+          <h2>AI Personal Assistant</h2>
+          <p>Context-aware assistant that understands your commitments and responsibilities.</p>
+        </div>
+      </div>
 
-      <div class="card" style="margin-top:14px">
-        <div id="chat_feed" style="height:48vh;overflow-y:auto;padding-right:6px">
-          ${chats.map((m, i) => `
-            <div class="msg ${m.role === 'user' ? 'u' : 'a'}">
-              ${esc(m.content).replace(/\n/g, '<br>')}
-              ${m.actionProposal ? `
-                <div style="margin-top:8px">
-                  <button class="btn s" onclick="acceptAIProposal(${i})">
-                    ${m.actionProposal.done ? '✓ Scheduled' : `＋ Add ${fmt(m.actionProposal.time)} · ${esc(m.actionProposal.title)}`}
+      <div class="card" style="height:calc(100vh - 230px);display:flex;flex-direction:column;justify-content:space-between;">
+        <div id="ai_feed" style="overflow-y:auto;flex:1;padding-right:8px;margin-bottom:16px;">
+          ${chats.map((c, i) => `
+            <div class="chat-bubble ${c.role === 'user' ? 'chat-user' : 'chat-ai'}">
+              ${esc(c.content).replace(/\n/g, '<br>')}
+              ${c.actionProposal ? `
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
+                  <button class="btn btn-success btn-sm" onclick="acceptChatScheduleProposal(${i})">
+                    ${c.actionProposal.done ? '✓ Scheduled' : `＋ Add to Calendar: ${formatTime(c.actionProposal.time)} · ${esc(c.actionProposal.title)}`}
                   </button>
                 </div>
               ` : ''}
             </div>
-          `).join('') || '<p class="mut">No conversation yet. Ask me to plan your day, summarize deadlines, or set tasks!</p>'}
-          ${isThinking ? '<div class="msg a">Thinking…</div>' : ''}
+          `).join('') || `
+            <div style="text-align:center;padding:48px 20px;color:var(--text-muted);">
+              <div style="font-size:2rem;margin-bottom:8px;">💡</div>
+              <p>Ask anything about your schedule, deadlines, or upcoming plans.</p>
+            </div>
+          `}
+          ${isAiThinking ? '<div class="chat-bubble chat-ai">Thinking…</div>' : ''}
         </div>
 
-        <div class="row" style="flex-wrap:wrap;margin:12px 0 8px">
-          ${roleChips.map(c => `
-            <button class="btn o s" onclick="sendChatPrompt('${c}')">${c}</button>
-          `).join('')}
-        </div>
+        <div style="border-top:1px solid var(--border);padding-top:14px;">
+          <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+            ${chips.map(chip => `
+              <button class="btn btn-secondary btn-sm" onclick="sendAiMessage('${chip}')">${chip}</button>
+            `).join('')}
+          </div>
 
-        <div class="row">
-          <input id="chat_input" placeholder="Ask anything about your tasks, schedule, or plans..." onkeydown="if(event.key==='Enter')sendChatPrompt()">
-          <button class="btn" onclick="sendChatPrompt()">Send</button>
+          <div class="row">
+            <input id="ai_input" placeholder="Type your instruction or question..." onkeydown="if(event.key==='Enter')sendAiMessage()">
+            <button class="btn btn-primary" onclick="sendAiMessage()">Send</button>
+          </div>
         </div>
       </div>
     `;
   },
 
   not() {
-    const T = ['All', 'Important', 'Scheduled', 'Low priority', 'Completed'];
-    let filtered = tasks.filter(x => activeTab === 'Completed' ? x.done : !x.done);
+    const tabs = ['All', 'High Priority', 'Pending Confirmations', 'Completed'];
+    let filtered = tasks;
 
-    if (activeTab === 'Important') filtered = filtered.filter(x => x.priority === 'h');
-    if (activeTab === 'Scheduled') filtered = filtered.filter(x => x.priority === 'm');
-    if (activeTab === 'Low priority') filtered = filtered.filter(x => x.priority === 'l');
-    filtered.sort(psrt);
-
-    const mutedPromos = captures.filter(x => x.status && x.status.includes('Muted'));
+    if (activeFilter === 'High Priority') filtered = filtered.filter(t => t.priority === 'h' && !t.done);
+    if (activeFilter === 'Pending Confirmations') filtered = filtered.filter(t => t.needsConfirmation && !t.done);
+    if (activeFilter === 'Completed') filtered = filtered.filter(t => t.done);
+    if (activeFilter === 'All') filtered = filtered.filter(t => !t.done);
 
     return `
-      <h2>Notifications & Reminders</h2>
-      <p class="mut">Important reminders come first. Low-priority noise is muted.</p>
+      <div class="row-sp" style="margin-bottom:20px;">
+        <div>
+          <h2>Alerts & Responsibilities</h2>
+          <p>Proactive reminders and follow-up management.</p>
+        </div>
+      </div>
 
-      <div class="row" style="flex-wrap:wrap;margin:14px 0">
-        ${T.map(t => `
-          <button class="btn ${t === activeTab ? '' : 'o'} s" onclick="activeTab='${t}';render()">
-            ${t === 'Important' ? 'Important 🔥' : t === 'Completed' ? 'Completed ✓' : t}
+      <div class="row" style="gap:8px;margin-bottom:20px;">
+        ${tabs.map(tab => `
+          <button class="btn ${activeFilter === tab ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="activeFilter='${tab}';renderApp();">
+            ${tab}
           </button>
         `).join('')}
       </div>
 
       <div class="card">
-        ${filtered.map(itemComponent).join('') || '<p class="mut">No reminders in this category.</p>'}
+        ${filtered.length ? filtered.sort(sortTasks).map(scheduleItemComponent).join('') : `
+          <div style="text-align:center;padding:36px;color:var(--text-muted);">
+            <p>No items found for this filter.</p>
+          </div>
+        `}
       </div>
-
-      ${(activeTab === 'All' || activeTab === 'Low priority') && mutedPromos.length ? `
-        <div class="card" style="margin-top:16px;background:rgba(255,255,255,0.7)">
-          <h3>↓ Muted Promotional Noise (Spam Silenced)</h3>
-          <p class="mut" style="font-size:0.85em">These messages were automatically recognized as marketing and excluded from your schedule.</p>
-          ${mutedPromos.map(x => `
-            <div class="item mut">
-              <span class="pill">${x.source}</span>
-              <span style="flex:1">${esc(x.rawText)}</span>
-              <small>${esc(x.status)}</small>
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
     `;
   },
 
   set() {
-    const permissions = user.permissions || { SMS: true, Call: true, WhatsApp: true, Photos: true, Email: true, Laptop: true };
-    const ai = user.aiSettings || { url: '', model: '', key: '' };
+    const perms = user.permissions || { SMS: true, Call: true, WhatsApp: true, Photos: true, Email: true, Laptop: true };
+    const aiConfig = user.aiSettings || { url: '', model: '', key: '' };
 
     return `
-      <h2>Settings & Privacy</h2>
-      <p class="mut">Manage data collection permissions, AI keys, and account controls.</p>
+      <div class="row-sp" style="margin-bottom:20px;">
+        <div>
+          <h2>Settings & Privacy</h2>
+          <p>Full control over communication channels, connected sources, and personal data.</p>
+        </div>
+      </div>
 
-      <div class="card" style="margin:16px 0">
-        <h3>Capture Permissions</h3>
-        <p class="mut">LifeOS only reads channels you switch on. You are in complete control.</p>
-        <div class="grid g2" style="margin-top:10px">
-          ${Object.keys(permissions).map(k => `
-            <label class="item" style="cursor:pointer">
-              <input type="checkbox" style="width:auto" ${permissions[k] ? 'checked' : ''} onchange="togglePermission('${k}', this.checked)">
-              <span><b>${k}</b> Capture</span>
+      <div class="card" style="margin-bottom:24px;">
+        <h3>Monitored Information Channels</h3>
+        <p style="margin-bottom:16px;">LifeOS AI only tracks sources you explicitly enable.</p>
+
+        <div class="grid grid-3">
+          ${Object.keys(perms).map(channel => `
+            <label class="row" style="background:var(--surface-subtle);padding:12px;border-radius:var(--radius-sm);cursor:pointer;">
+              <input type="checkbox" style="width:auto;" ${perms[channel] ? 'checked' : ''} onchange="updateChannelPermission('${channel}', this.checked)">
+              <span style="font-size:0.9rem;font-weight:600;text-transform:none;color:var(--text-main);">${channel} Channel</span>
             </label>
           `).join('')}
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <h3>AI Connection</h3>
-        <p class="mut">
-          LifeOS includes built-in smart scheduling. You can optionally connect your own OpenAI-compatible endpoint or model key for custom reasoning.
-        </p>
-        <div class="grid g2" style="margin-top:10px">
-          <input id="ai_url" placeholder="Endpoint URL (e.g. https://api.openai.com/v1/chat/completions)" value="${esc(ai.url || '')}">
-          <input id="ai_model" placeholder="Model (e.g. gpt-4o-mini)" value="${esc(ai.model || '')}">
-          <input id="ai_key" type="password" placeholder="API Key" style="grid-column:1/-1" value="${esc(ai.key || '')}">
+      <div class="card" style="margin-bottom:24px;">
+        <h3>AI Provider Configuration</h3>
+        <p style="margin-bottom:14px;">Connect your custom LLM endpoint or OpenAI API key for enhanced reasoning.</p>
+
+        <div class="grid grid-2">
+          <div>
+            <label>API Endpoint URL</label>
+            <input id="ai_url" placeholder="https://api.openai.com/v1/chat/completions" value="${esc(aiConfig.url || '')}">
+          </div>
+          <div>
+            <label>Model Name</label>
+            <input id="ai_model" placeholder="gpt-4o-mini" value="${esc(aiConfig.model || '')}">
+          </div>
+          <div style="grid-column:1/-1;">
+            <label>Secret API Key</label>
+            <input id="ai_key" type="password" placeholder="sk-..." value="${esc(aiConfig.key || '')}">
+          </div>
         </div>
-        <button class="btn s" style="margin-top:12px" onclick="saveAISettings()">Save AI Settings</button>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px;" onclick="saveCustomAiSettings()">Save Settings</button>
       </div>
 
       <div class="card">
-        <h3>Account & Data Isolation</h3>
-        <p class="mut">Logged in as: <b>${esc(user.email)}</b> (${esc(user.name)})</p>
-        <div class="row" style="flex-wrap:wrap;margin-top:14px;gap:10px">
-          <button class="btn o" onclick="exportData()">📥 Export My Data (JSON)</button>
-          <button class="btn danger" onclick="clearAllData()">⚠️ Clear All My Data</button>
+        <h3>Data Management & Privacy</h3>
+        <p style="margin-bottom:16px;">Logged in as: <b>${esc(user.email)}</b> (${esc(user.name)})</p>
+        <div class="row" style="gap:10px;">
+          <button class="btn btn-secondary" onclick="exportUserData()">📥 Export My Data (JSON)</button>
+          <button class="btn btn-danger" onclick="wipeAccountData()">⚠️ Wipe All My Data</button>
         </div>
       </div>
     `;
   }
 };
 
-/* ---------------- Render Router ---------------- */
-function render() {
+/* ---------------- Main Layout Controller ---------------- */
+function renderApp() {
   if (!user) {
     document.body.className = '';
-    $('#root').innerHTML = renderLanding();
+    $('#app-root').innerHTML = renderLanding();
     return;
   }
 
-  const m = MODS[user.role] || MODS.spark;
+  const role = ROLES[user.role] || ROLES.spark;
   const navItems = [
-    ['dash', '🏠', 'Dashboard'],
-    ['rem', '⏰', 'Reminders'],
-    ['cap', '📲', 'Smart Capture'],
+    ['dash', '📊', 'Dashboard'],
+    ['cap', '💬', 'Smart Capture'],
+    ['rem', '🗓️', 'Schedule'],
     ['ai', '🤖', 'AI Assistant'],
-    ['not', '🔔', 'Notifications'],
+    ['not', '🔔', 'Alerts'],
     ['set', '⚙️', 'Settings']
   ];
 
-  $('#root').innerHTML = `
-    <div class="app" style="--m:${m.c}">
-      <aside class="side">
-        <div class="logo">
-          <div class="logo-badge">⚡</div>
-          LifeOS AI
+  $('#app-root').innerHTML = `
+    <div class="app-container">
+      <aside class="sidebar">
+        <div>
+          <div class="sidebar-brand">
+            <div class="brand-mark">L</div>
+            <div>
+              <h3 style="font-size:1.05rem;">LifeOS AI</h3>
+              <span class="badge badge-primary" style="font-size:0.7rem;">${role.badge}</span>
+            </div>
+          </div>
+
+          <nav>
+            ${navItems.map(n => `
+              <button class="nav-btn ${currentView === n[0] ? 'active' : ''}" onclick="currentView='${n[0]}';renderApp();">
+                <span>${n[1]}</span>
+                <span>${n[2]}</span>
+              </button>
+            `).join('')}
+          </nav>
         </div>
-        ${navItems.map(n => `
-          <button class="nv ${activeView === n[0] ? 'on' : ''}" onclick="activeView='${n[0]}';render()">
-            <span>${n[1]}</span> ${n[2]}
-          </button>
-        `).join('')}
+
+        <div style="border-top:1px solid var(--border);padding-top:16px;">
+          <div class="row-sp" style="margin-bottom:10px;">
+            <div style="min-width:0;">
+              <b style="font-size:0.85rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(user.name)}</b>
+              <small style="color:var(--text-muted);font-size:0.75rem;">${esc(user.email)}</small>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="logout()" title="Sign Out">Sign out</button>
+          </div>
+        </div>
       </aside>
 
-      <main class="main">
-        <div class="row sp" style="margin-bottom:18px;flex-wrap:wrap">
-          <div>
-            <b>${esc(user.name)}</b>
-            <span class="pill" style="background:${m.c};margin-left:6px">${m.n} · ${m.who}</span>
-          </div>
-          <button class="btn o s" onclick="logout()">Log out</button>
-        </div>
-
-        ${VIEWS[activeView] ? VIEWS[activeView]() : VIEWS.dash()}
+      <main class="main-content">
+        ${VIEWS[currentView] ? VIEWS[currentView]() : VIEWS.dash()}
       </main>
-
-      <button class="fab" onclick="activeView='cap';render()" aria-label="Smart Capture">📲</button>
     </div>
   `;
 
-  // Auto-scroll chat feed
-  const chatFeed = $('#chat_feed');
-  if (chatFeed) chatFeed.scrollTop = chatFeed.scrollHeight;
-
-  // Animate counters when view changes
-  if (lastView !== activeView) {
-    lastView = activeView;
-    document.querySelectorAll('.cnt').forEach(el => {
-      const target = +el.dataset.n;
-      const suffix = el.dataset.s || '';
-      const start = performance.now();
-      function tick(now) {
-        const progress = Math.min(1, (now - start) / 600);
-        el.textContent = Math.round(target * progress) + suffix;
-        if (progress < 1) requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    });
-  }
+  const feed = $('#ai_feed');
+  if (feed) feed.scrollTop = feed.scrollHeight;
 }
 
-/* ---------------- Action Handlers ---------------- */
-// Reminders CRUD
-async function createTask() {
-  const title = $('#rt').value.trim();
-  if (!title) return toast('Please enter a reminder title.');
-  const time = $('#rm').value || '09:00';
-  const dateOffset = parseInt($('#rd').value, 10) || 0;
-  const priority = $('#rp').value || 'm';
+/* ---------------- Actions ---------------- */
+async function createNewTask() {
+  const title = $('#new_title').value.trim();
+  if (!title) return showToast('Please enter a title.');
+  const time = $('#new_time').value || '10:00';
+  const dateOffset = parseInt($('#new_day').value, 10) || 0;
+  const priority = $('#new_pri').value;
+  const location = $('#new_loc').value.trim() || null;
+  const category = $('#new_cat').value;
 
   try {
     const newTask = await api('/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, time, dateOffset, priority, source: 'You' })
+      body: JSON.stringify({ title, time, dateOffset, priority, location, category, source: 'Manual' })
     });
     tasks.push(newTask);
-    render();
-    toast('Reminder added to schedule.');
+    renderApp();
+    showToast('Scheduled successfully.');
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function toggleTask(id) {
+async function toggleTaskDone(id) {
   const task = tasks.find(t => t._id === id);
   if (!task) return;
   try {
@@ -778,30 +886,41 @@ async function toggleTask(id) {
       body: JSON.stringify({ done: !task.done })
     });
     task.done = updated.done;
-    render();
-    toast(task.done ? 'Task marked as done.' : 'Task uncompleted.');
+    renderApp();
+    showToast(task.done ? 'Marked as completed.' : 'Unchecked task.');
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function deleteTask(id) {
+async function confirmTentativeTask(id) {
+  try {
+    const res = await api(`/tasks/${id}/confirm`, { method: 'POST' });
+    const idx = tasks.findIndex(t => t._id === id);
+    if (idx !== -1) tasks[idx] = res.task;
+    await refreshAllData();
+    showToast('Plan confirmed and added to calendar!');
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+async function deleteTaskItem(id) {
   try {
     await api(`/tasks/${id}`, { method: 'DELETE' });
     tasks = tasks.filter(t => t._id !== id);
-    render();
-    toast('Reminder deleted.');
+    renderApp();
+    showToast('Event removed.');
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-// Smart Capture
-async function captureText(explicitText, explicitSource) {
-  const source = explicitSource || $('#cs').value;
-  const text = explicitText || $('#ct').value.trim();
+async function submitTextCapture(explicitText, explicitSource) {
+  const source = explicitSource || $('#cap_src').value;
+  const text = explicitText || $('#cap_text').value.trim();
 
-  if (!text) return toast('Please enter a message or note to analyze.');
+  if (!text) return showToast('Please enter message or conversation content.');
 
   try {
     const res = await api('/captures', {
@@ -811,25 +930,25 @@ async function captureText(explicitText, explicitSource) {
 
     captures.unshift(res.capture);
     if (res.task) tasks.push(res.task);
-    if ($('#ct')) $('#ct').value = '';
-    render();
-    toast(res.analysis.status + (res.task ? ': Added to schedule!' : ''));
+    if ($('#cap_text')) $('#cap_text').value = '';
+    await refreshAllData();
+    showToast(res.analysis.status);
   } catch (err) {
-    toast(err.message);
+    showToast(err.message);
   }
 }
 
-function triggerPhotoUpload() {
-  const input = $('#photo_input');
+function triggerFilePicker() {
+  const input = $('#file_picker');
   if (input) input.click();
 }
 
-async function handlePhotoUpload(file) {
+async function uploadPhotoOrDoc(file) {
   if (!file) return;
   const formData = new FormData();
   formData.append('photo', file);
 
-  toast('Scanning image & extracting schedule with AI…');
+  showToast('Analyzing image with OCR & AI Intent Parser…');
   try {
     const res = await fetch('/api/captures/photo', {
       method: 'POST',
@@ -837,68 +956,74 @@ async function handlePhotoUpload(file) {
       body: formData
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Photo analysis failed');
+    if (!res.ok) throw new Error(data.error || 'Failed to process document');
 
     captures.unshift(data.capture);
     if (data.task) tasks.push(data.task);
-    render();
-    toast(data.analysis.status + (data.task ? ': Reminder set!' : ''));
+    await refreshAllData();
+    showToast(data.analysis.status);
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-function pasteClipboard() {
+function pasteClip() {
   if (!navigator.clipboard || !navigator.clipboard.readText) {
-    return toast('Clipboard not available. Please paste manually.');
+    return showToast('Clipboard API not permitted. Paste manually.');
   }
   navigator.clipboard.readText()
     .then(t => {
-      $('#ct').value = t;
-      captureText(t);
+      $('#cap_text').value = t;
+      submitTextCapture(t);
     })
-    .catch(() => toast('Allow clipboard permission or paste manually.'));
+    .catch(() => showToast('Please allow clipboard permission.'));
 }
 
-function voiceInput() {
+function dictateVoice() {
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Speech) return toast('Speech recognition is not supported in this browser.');
+  if (!Speech) return showToast('Voice dictation not supported in this browser.');
   const rec = new Speech();
   rec.lang = 'en-US';
   rec.onresult = e => {
-    const text = e.results[0][0].transcript;
-    $('#ct').value = text;
-    captureText(text);
+    const transcript = e.results[0][0].transcript;
+    $('#cap_text').value = transcript;
+    submitTextCapture(transcript);
   };
-  rec.onerror = () => toast('Voice recording ended. Try again.');
+  rec.onerror = () => showToast('Voice recognition canceled.');
   rec.start();
-  toast('Listening… Speak your reminder.');
+  showToast('Listening… Speak your message.');
 }
 
-const SAMPLE_MESSAGES = [
-  ['SMS', 'Dr. Adams: Your appointment is confirmed tomorrow at 10:30 am at Central Health.'],
-  ['Call', 'Missed call from Project Lead. Please call back at 3 pm.'],
-  ['WhatsApp', 'Team: Final design proposal submission due tomorrow at 5 pm, please upload slides.'],
-  ['Email', 'Your electricity bill of $42 is due tomorrow at 6 pm. Pay now to avoid late fee.'],
-  ['SMS', 'FLAT 50% OFF on all sneakers! Limited time discount code SHOE50. Hurry up!'],
-  ['SMS', 'Your bank verification code is 849201. Never share your OTP with anyone.']
+const REALISTIC_SIMULATIONS = [
+  // 1. Dialogue with mutual agreement (Confirmed trip)
+  ['WhatsApp', 'Alex: "Let\'s go on a trip this weekend!"\nMe: "Okay, let\'s go! Saturday morning works."'],
+  // 2. Tentative coffee proposal (Needs confirmation)
+  ['WhatsApp', 'Sarah: "How about grabbing coffee on Friday at 4 pm at Starbucks?"'],
+  // 3. Official Doctor appointment
+  ['SMS', 'Dr. Adams: Your follow-up checkup is confirmed tomorrow at 10:30 am at City Health Clinic.'],
+  // 4. Utility Bill Email
+  ['Email', 'Invoice Notice: Your electricity bill of $64.20 is due tomorrow at 5:00 pm. Pay now to avoid late fee.'],
+  // 5. Marketing Promotional spam (Muted)
+  ['SMS', 'CLEARANCE SALE! Flat 70% discount on shoes today only with code FLASH70. Hurry!'],
+  // 6. Sensitive OTP (Scrubbed and discarded)
+  ['SMS', 'Your verification passcode is 591024. Never share your password or OTP with anyone.']
 ];
 
-function simulateIncoming() {
-  const s = SAMPLE_MESSAGES[sampleIndex++ % SAMPLE_MESSAGES.length];
-  captureText(s[1], s[0]);
+function runSimulation() {
+  const sim = REALISTIC_SIMULATIONS[simIndex++ % REALISTIC_SIMULATIONS.length];
+  submitTextCapture(sim[1], sim[0]);
 }
 
 // AI Assistant
-async function sendChatPrompt(promptText) {
-  const input = $('#chat_input');
+async function sendAiMessage(promptText) {
+  const input = $('#ai_input');
   const q = (promptText || (input ? input.value : '')).trim();
-  if (!q || isThinking) return;
+  if (!q || isAiThinking) return;
 
   if (input) input.value = '';
   chats.push({ role: 'user', content: q });
-  isThinking = true;
-  render();
+  isAiThinking = true;
+  renderApp();
 
   try {
     const res = await api('/ai/chat', {
@@ -911,14 +1036,14 @@ async function sendChatPrompt(promptText) {
       actionProposal: res.actionProposal
     });
   } catch (err) {
-    chats.push({ role: 'assistant', content: 'Sorry, I could not complete that request.' });
+    chats.push({ role: 'assistant', content: 'Could not complete AI request.' });
   } finally {
-    isThinking = false;
-    render();
+    isAiThinking = false;
+    renderApp();
   }
 }
 
-async function acceptAIProposal(index) {
+async function acceptChatScheduleProposal(index) {
   const msg = chats[index];
   if (!msg || !msg.actionProposal || msg.actionProposal.done) return;
   const p = msg.actionProposal;
@@ -931,46 +1056,45 @@ async function acceptAIProposal(index) {
         time: p.time,
         priority: p.priority || 'm',
         dateOffset: 0,
-        source: 'AI'
+        source: 'AI Assistant'
       })
     });
     tasks.push(newTask);
     p.done = true;
-    render();
-    toast('Added AI recommendation to your schedule.');
+    renderApp();
+    showToast('Added to your calendar.');
   } catch (err) {
-    toast('Failed to add task: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function optimizeSchedule() {
-  toast('Analyzing your schedule and role requirements…');
+async function optimizeDailySchedule() {
+  showToast('Analyzing daily commitments and workload…');
   try {
     const res = await api('/ai/optimize', { method: 'POST' });
     if (res.addedTask) tasks.push(res.addedTask);
-    render();
-    toast(res.message);
+    renderApp();
+    showToast(res.message);
   } catch (err) {
-    toast('Optimization error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-// Settings
-async function togglePermission(key, value) {
+async function updateChannelPermission(channel, enabled) {
   if (!user.permissions) user.permissions = {};
-  user.permissions[key] = value;
+  user.permissions[channel] = enabled;
   try {
     await api('/auth/settings', {
       method: 'PATCH',
       body: JSON.stringify({ permissions: user.permissions })
     });
-    toast(`${key} capture permission ${value ? 'enabled' : 'disabled'}.`);
+    showToast(`${channel} monitoring ${enabled ? 'enabled' : 'disabled'}.`);
   } catch (err) {
-    toast('Failed to update permission: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function saveAISettings() {
+async function saveCustomAiSettings() {
   const url = $('#ai_url').value.trim();
   const model = $('#ai_model').value.trim();
   const key = $('#ai_key').value.trim();
@@ -981,25 +1105,25 @@ async function saveAISettings() {
       body: JSON.stringify({ aiSettings: { url, model, key } })
     });
     user.aiSettings = { url, model, key };
-    toast('AI connection settings saved.');
+    showToast('AI configuration updated.');
   } catch (err) {
-    toast('Failed to save AI settings: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function clearCaptures() {
+async function clearAllCaptures() {
   try {
     await api('/captures', { method: 'DELETE' });
     captures = [];
-    render();
-    toast('Captured activity log cleared.');
+    renderApp();
+    showToast('Capture history cleared.');
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-async function clearAllData() {
-  if (!confirm('Are you sure you want to clear all your tasks, reminders, and capture logs? This cannot be undone.')) return;
+async function wipeAccountData() {
+  if (!confirm('Are you sure you want to delete all personal reminders, schedules, and captured messages?')) return;
   try {
     await Promise.all([
       api('/tasks', { method: 'DELETE' }),
@@ -1007,64 +1131,45 @@ async function clearAllData() {
     ]);
     tasks = [];
     captures = [];
-    render();
-    toast('All your private data has been wiped.');
+    renderApp();
+    showToast('All your private records have been erased.');
   } catch (err) {
-    toast('Error: ' + err.message);
+    showToast(err.message);
   }
 }
 
-function exportData() {
+function exportUserData() {
   const payload = {
-    user: { name: user.name, email: user.email, role: user.role },
+    profile: { name: user.name, email: user.email, role: user.role },
     tasks,
     captures,
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = `lifeos_${user.role}_backup_${Date.now()}.json`;
+  a.href = URL.createObjectURL(blob);
+  a.download = `lifeos_data_${Date.now()}.json`;
   a.click();
-  URL.revokeObjectURL(url);
-  toast('Data exported successfully.');
+  showToast('Data exported successfully.');
 }
 
-// Background alarm checking for due reminders
+// Background reminder and approaching deadline alerts
 setInterval(() => {
   if (!user || !tasks.length) return;
   const now = new Date();
   const curTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   tasks.forEach(t => {
-    if (!t.done && !t.dateOffset && t.time === curTime && !t._notified) {
-      t._notified = true;
-      toast(`⏰ Reminder: ${t.title}`);
+    if (!t.done && !t.dateOffset && t.time === curTime && !t._alertSent) {
+      t._alertSent = true;
+      showToast(`⏰ Event Reminder: ${t.title}`);
       if (window.Notification && Notification.permission === 'granted') {
-        new Notification('LifeOS AI Reminder', {
-          body: `${t.title} at ${fmt(t.time)}`
+        new Notification('LifeOS Commitment Reminder', {
+          body: `${t.title} at ${formatTime(t.time)}`
         });
       }
     }
   });
 }, 15000);
 
-// Android Native Bridge drain polling if running inside Android companion app
-setInterval(async () => {
-  if (!window.NativeBridge || !user) return;
-  try {
-    const raw = NativeBridge.drain();
-    const items = JSON.parse(raw);
-    if (Array.isArray(items) && items.length > 0) {
-      const res = await api('/sync/android', {
-        method: 'POST',
-        body: JSON.stringify({ items })
-      });
-      await syncData();
-    }
-  } catch (e) {}
-}, 4000);
-
-// Startup Initialization
-initSession();
+init();

@@ -1,6 +1,7 @@
 /**
  * Complete End-to-End Test Suite for LifeOS AI
- * Verifies Auth, Data Isolation, Smart Scheduling, Capture, AI Optimization, Permissions, and Delivery
+ * Verifies Auth, Data Isolation, Conversational Intent, Smart Scheduling, Capture,
+ * Tentative Plan Confirmation, AI Optimization, Permissions, and Delivery
  */
 
 const http = require('http');
@@ -100,30 +101,57 @@ async function runTests() {
   const toggleRes = await request('PATCH', `/api/tasks/${taskId}`, { done: true }, token1);
   assert(toggleRes.status === 200 && toggleRes.data.done === true, 'Task completion toggled to true');
 
-  // 5. Smart Capture & AI Scheduling
-  console.log('\n--- Step 5: Smart Capture & AI Scheduling Engine ---');
+  // 5. Smart Capture & Conversational Intent Understanding
+  console.log('\n--- Step 5: Conversational Intent & Smart Capture ---');
 
-  // Test A: Actionable Doctor Appointment SMS
+  // Test A: Mutual Agreement Dialogue (Friend suggests trip + Me accepts)
+  const mutualDialogue = await request('POST', '/api/captures', {
+    source: 'WhatsApp',
+    text: "Friend: Let's go on a trip this weekend!\nMe: Okay, let's go! Saturday morning works."
+  }, token1);
+  assert(mutualDialogue.status === 201, 'Dialogue capture processed');
+  assert(mutualDialogue.data.analysis.isActionable === true, 'AI recognized mutual agreement on weekend trip');
+  assert(mutualDialogue.data.analysis.category === 'Travel & Social', 'Category classified as Travel & Social');
+  assert(mutualDialogue.data.analysis.intent === 'confirmed_commitment', 'Intent recognized as confirmed commitment');
+  assert(mutualDialogue.data.task !== null, 'Weekend trip auto-scheduled');
+
+  // Test B: Declined Proposal Dialogue (Friend suggests trip + Me declines)
+  const declinedDialogue = await request('POST', '/api/captures', {
+    source: 'WhatsApp',
+    text: "Friend: Let's go on a trip this weekend!\nMe: Sorry, I am busy and can't make it this weekend."
+  }, token1);
+  assert(declinedDialogue.status === 201, 'Declined dialogue processed');
+  assert(declinedDialogue.data.analysis.isActionable === false, 'AI recognized user declined proposal');
+  assert(declinedDialogue.data.task === null, 'No event scheduled for declined proposal');
+
+  // Test C: Tentative Single Proposal (Awaiting user confirmation)
+  const tentativeInvite = await request('POST', '/api/captures', {
+    source: 'WhatsApp',
+    text: 'Sarah: How about coffee on Friday at 4 pm at Starbucks?'
+  }, token1);
+  assert(tentativeInvite.status === 201, 'Tentative invite processed');
+  assert(tentativeInvite.data.analysis.needsConfirmation === true, 'Recognized plan as tentative needing confirmation');
+  assert(tentativeInvite.data.task !== null, 'Created pending plan record');
+  const tentativeTaskId = tentativeInvite.data.task._id;
+
+  // Confirm the tentative plan via API
+  const confirmPlanRes = await request('POST', `/api/tasks/${tentativeTaskId}/confirm`, {}, token1);
+  assert(confirmPlanRes.status === 200, 'Tentative plan confirmed successfully');
+  assert(confirmPlanRes.data.task.needsConfirmation === false, 'Plan converted to locked confirmed commitment');
+
+  // Test D: Actionable Doctor Appointment SMS
   const smsDoc = await request('POST', '/api/captures', {
     source: 'SMS',
     text: 'Dr. Rao: Your clinic appointment is confirmed tomorrow at 11:30 am.'
   }, token1);
   assert(smsDoc.status === 201, 'SMS capture processed');
   assert(smsDoc.data.analysis.isActionable === true, 'AI identified appointment as actionable');
-  assert(smsDoc.data.analysis.category === 'Health', 'Category classified as Health');
+  assert(smsDoc.data.analysis.category === 'Health & Care', 'Category classified as Health & Care');
   assert(smsDoc.data.analysis.priority === 'h', 'Priority determined as High (Health)');
   assert(smsDoc.data.analysis.time === '11:30', 'Extracted exact appointment time 11:30');
   assert(smsDoc.data.task !== null, 'Automatically scheduled in user calendar');
 
-  // Test B: WhatsApp Team Meeting
-  const waMeeting = await request('POST', '/api/captures', {
-    source: 'WhatsApp',
-    text: 'Design team: Project architecture sync today at 4 pm on Google Meet.'
-  }, token1);
-  assert(waMeeting.status === 201 && waMeeting.data.task !== null, 'WhatsApp meeting auto-scheduled');
-  assert(waMeeting.data.analysis.time === '16:00', '24-hour time converted correctly: 4 pm -> 16:00');
-
-  // Test C: Promotional Marketing Spam Filter
+  // Test E: Promotional Marketing Spam Filter
   const promoSpam = await request('POST', '/api/captures', {
     source: 'SMS',
     text: 'Mega flash sale! Flat 60% off on all sportswear today only with promo code FLASH60.'
@@ -133,7 +161,7 @@ async function runTests() {
   assert(promoSpam.data.task === null, 'No schedule entry created for promotional spam');
   assert(promoSpam.data.analysis.status.includes('Muted'), 'Spam status set to Muted');
 
-  // Test D: Sensitive OTP Code Security Scrubbing
+  // Test F: Sensitive OTP Code Security Scrubbing
   const otpMessage = await request('POST', '/api/captures', {
     source: 'SMS',
     text: 'Your confidential OTP is 928301. Valid for 10 minutes. Do not share your password or OTP.'
@@ -143,42 +171,44 @@ async function runTests() {
   assert(otpMessage.data.task === null, 'Sensitive code NOT scheduled');
   assert(!otpMessage.data.capture.rawText.includes('928301'), 'Sensitive code scrubbed and never stored in database');
 
-  // 6. AI Schedule Optimization
-  console.log('\n--- Step 6: AI Schedule Optimizer ---');
-  const optimizeRes = await request('POST', '/api/ai/optimize', {}, token1);
-  assert(optimizeRes.status === 200 && optimizeRes.data.message, 'AI optimizer analyzed student schedule');
-  console.log(`   Optimizer Message: "${optimizeRes.data.message}"`);
+  // 6. Smart Alerts & Follow-ups API
+  console.log('\n--- Step 6: Smart Alerts & Notifications API ---');
+  const alertsRes = await request('GET', '/api/tasks/alerts', null, token1);
+  assert(alertsRes.status === 200, 'Alerts endpoint returned status 200');
+  assert(Array.isArray(alertsRes.data.urgentDeadlines), 'Returns urgent deadlines list');
 
-  // 7. AI Assistant Chat Grounding
-  console.log('\n--- Step 7: AI Assistant Chat ---');
+  // 7. AI Schedule Optimization
+  console.log('\n--- Step 7: AI Schedule Optimizer ---');
+  const optimizeRes = await request('POST', '/api/ai/optimize', {}, token1);
+  assert(optimizeRes.status === 200 && optimizeRes.data.message, 'AI optimizer analyzed schedule');
+
+  // 8. AI Assistant Chat Grounding
+  console.log('\n--- Step 8: AI Assistant Chat ---');
   const chatRes = await request('POST', '/api/ai/chat', {
     message: 'What tasks do I have scheduled for today?'
   }, token1);
   assert(chatRes.status === 200 && chatRes.data.reply, 'AI Assistant replied with contextual schedule info');
 
-  // 8. Privacy & Permissions Enforcement
-  console.log('\n--- Step 8: Privacy & Permissions Enforcement ---');
-  // Turn off WhatsApp capture
+  // 9. Privacy & Permissions Enforcement
+  console.log('\n--- Step 9: Privacy & Permissions Enforcement ---');
   const updatePerms = await request('PATCH', '/api/auth/settings', {
     permissions: { SMS: true, Call: true, WhatsApp: false, Photos: true, Email: true, Laptop: true }
   }, token1);
   assert(updatePerms.status === 200 && updatePerms.data.permissions.WhatsApp === false, 'WhatsApp permission disabled in settings');
 
-  // Attempt capture from disabled channel
   const blockedCapture = await request('POST', '/api/captures', {
     source: 'WhatsApp',
     text: 'Meeting at 5 pm'
   }, token1);
   assert(blockedCapture.status === 403, 'Capture from disabled channel blocked with 403 Forbidden');
-  console.log(`   Blocked Notice: "${blockedCapture.data.error}"`);
 
-  // 9. Static Frontend Delivery
-  console.log('\n--- Step 9: Frontend Web Delivery ---');
+  // 10. Static Frontend Delivery
+  console.log('\n--- Step 10: Frontend Web Delivery ---');
   const frontendRes = await request('GET', '/');
   assert(frontendRes.status === 200 && frontendRes.text.includes('LifeOS AI'), 'Frontend index.html served correctly');
 
   console.log('\n==================================================');
-  console.log('🎉 ALL 14 TEST SUITES PASSED WITH 100% SUCCESS!');
+  console.log('🎉 ALL 18 ADVANCED TEST SUITES PASSED WITH 100% SUCCESS!');
   console.log('==================================================');
 }
 

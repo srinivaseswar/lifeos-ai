@@ -40,20 +40,21 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // AI Smart Scheduling Analysis
+    // AI Conversational & Intent Understanding Analysis
     const analysis = await analyzeScheduleContent(text.trim(), src, user.aiSettings);
 
     // Save capture record
     const captureRecord = await db.captures.create({
       userId: req.user.id,
       source: src,
-      rawText: analysis.sensitive ? 'Sensitive code detected and discarded' : text.trim(),
+      rawText: analysis.sensitive ? 'Sensitive code detected and discarded (Privacy Protected)' : text.trim(),
       category: analysis.category || 'General',
+      intent: analysis.intent || 'general',
       status: analysis.status || 'Processed',
       sensitive: Boolean(analysis.sensitive)
     });
 
-    // If actionable and not sensitive, automatically create the schedule task
+    // If actionable and not sensitive, create the schedule task or pending confirmation
     let createdTask = null;
     if (analysis.isActionable && !analysis.sensitive) {
       createdTask = await db.tasks.create({
@@ -62,8 +63,14 @@ router.post('/', async (req, res) => {
         time: analysis.time || '09:00',
         dateOffset: analysis.dateOffset || 0,
         date: analysis.date || '',
+        dateLabel: analysis.dateLabel || '',
         priority: analysis.priority || 'm',
         category: analysis.category || 'General',
+        intent: analysis.intent || 'confirmed_commitment',
+        needsConfirmation: Boolean(analysis.needsConfirmation),
+        location: analysis.location || null,
+        participants: analysis.participants || [],
+        remindBefore: analysis.remindBefore || 30,
         source: src,
         aiGenerated: true
       });
@@ -84,7 +91,7 @@ router.post('/', async (req, res) => {
 router.post('/photo', upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'Please upload an image file (JPG, PNG, or WEBP).' });
+      return res.status(400).json({ error: 'Please upload an image or document.' });
     }
 
     // Check Photos permission
@@ -98,7 +105,7 @@ router.post('/photo', upload.single('photo'), async (req, res) => {
       });
     }
 
-    // Extract text from photo via OCR
+    // Extract text from photo/document via OCR
     let extractedText = '';
     try {
       extractedText = await extractTextFromImage(req.file.path);
@@ -106,17 +113,17 @@ router.post('/photo', upload.single('photo'), async (req, res) => {
       console.warn('OCR error:', ocrErr.message);
     }
 
-    // Append optional note from user if provided
     const combinedText = (req.body.note ? req.body.note + ' ' : '') + (extractedText || req.file.originalname);
 
-    // Analyze extracted text with AI Smart Scheduler
+    // Analyze extracted text with AI Conversational Scheduler
     const analysis = await analyzeScheduleContent(combinedText, 'Photo', user.aiSettings);
 
     const captureRecord = await db.captures.create({
       userId: req.user.id,
       source: 'Photo',
-      rawText: analysis.sensitive ? 'Sensitive code detected in image and discarded' : (extractedText || 'Photo scanned: ' + req.file.originalname),
+      rawText: analysis.sensitive ? 'Sensitive code detected in image and discarded' : (extractedText || 'Photo analyzed: ' + req.file.originalname),
       category: analysis.category || 'General',
+      intent: analysis.intent || 'document',
       status: analysis.status || 'Photo analyzed',
       sensitive: Boolean(analysis.sensitive)
     });
@@ -125,12 +132,18 @@ router.post('/photo', upload.single('photo'), async (req, res) => {
     if (analysis.isActionable && !analysis.sensitive) {
       createdTask = await db.tasks.create({
         userId: req.user.id,
-        title: analysis.title || ('Photo task: ' + (analysis.category || 'Scanned Document')),
+        title: analysis.title || ('Photo Item: ' + (analysis.category || 'Scanned Document')),
         time: analysis.time || '10:00',
         dateOffset: analysis.dateOffset || 0,
         date: analysis.date || '',
+        dateLabel: analysis.dateLabel || '',
         priority: analysis.priority || 'm',
         category: analysis.category || 'General',
+        intent: analysis.intent || 'confirmed_commitment',
+        needsConfirmation: Boolean(analysis.needsConfirmation),
+        location: analysis.location || null,
+        participants: analysis.participants || [],
+        remindBefore: analysis.remindBefore || 30,
         source: 'Photo',
         aiGenerated: true
       });

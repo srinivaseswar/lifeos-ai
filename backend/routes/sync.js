@@ -35,20 +35,21 @@ router.post('/android', async (req, res) => {
         continue;
       }
 
-      // Analyze and parse
+      // Analyze conversational intent
       const analysis = await analyzeScheduleContent(text, src, user.aiSettings);
 
       // Save capture
       await db.captures.create({
         userId: req.user.id,
         source: src,
-        rawText: analysis.sensitive ? 'Sensitive code detected and discarded' : text,
+        rawText: analysis.sensitive ? 'Sensitive code detected and discarded (Privacy Protected)' : text,
         category: analysis.category || 'General',
+        intent: analysis.intent || 'general',
         status: analysis.status || 'Synced from Android',
         sensitive: Boolean(analysis.sensitive)
       });
 
-      // Automatically add to schedule if actionable
+      // Automatically add to schedule or pending confirmations if actionable
       let task = null;
       if (analysis.isActionable && !analysis.sensitive) {
         task = await db.tasks.create({
@@ -57,8 +58,14 @@ router.post('/android', async (req, res) => {
           time: analysis.time || '09:00',
           dateOffset: analysis.dateOffset || 0,
           date: analysis.date || '',
+          dateLabel: analysis.dateLabel || '',
           priority: analysis.priority || 'm',
           category: analysis.category || 'General',
+          intent: analysis.intent || 'confirmed_commitment',
+          needsConfirmation: Boolean(analysis.needsConfirmation),
+          location: analysis.location || null,
+          participants: analysis.participants || [],
+          remindBefore: analysis.remindBefore || 30,
           source: src,
           aiGenerated: true
         });
@@ -68,7 +75,8 @@ router.post('/android', async (req, res) => {
         source: src,
         title: analysis.title,
         status: analysis.status,
-        scheduled: Boolean(task)
+        scheduled: Boolean(task),
+        needsConfirmation: Boolean(analysis.needsConfirmation)
       });
     }
 
